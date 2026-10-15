@@ -152,6 +152,11 @@ private:
   std::string        deviceManufacturer;
   uint8_t            batteryLevel;
   bool               connected = false;
+#if defined(NIMBLE_V2)
+  bool               isAuthenticated = false;
+  bool               isKeyboardSubscribed = false;
+  bool               isMediaKeysSubscribed = false;
+#endif
   uint32_t           _delay_ms = 7;
   void delay_ms(uint64_t ms);
 
@@ -186,7 +191,9 @@ protected:
   virtual void onStarted(BLEServer *pServer) { };
   virtual void onConnect(BLEServer* pServer, NimBLEConnInfo& connInfo) override;
   virtual void onDisconnect(BLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override;
+  virtual void onAuthenticationComplete(NimBLEConnInfo& connInfo) override;
   virtual void onWrite(BLECharacteristic* me, NimBLEConnInfo& connInfo) override;
+  virtual void onSubscribe(BLECharacteristic* me, NimBLEConnInfo& connInfo, uint16_t subValue) override;
 #else
   virtual void onStarted(BLEServer *pServer) { };
   virtual void onConnect(BLEServer* pServer) override;

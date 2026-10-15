@@ -124,6 +124,8 @@ void BleKeyboard::begin(void)
   inputMediaKeys = hid->getInputReport(MEDIA_KEYS_ID);
 
   outputKeyboard->setCallbacks(this);
+  inputKeyboard->setCallbacks(this);
+  inputMediaKeys->setCallbacks(this);
 
   hid->setManufacturer(deviceManufacturer);
   hid->setPnp(0x02, vid, pid, version);
@@ -544,11 +546,42 @@ size_t BleKeyboard::write(const uint8_t *buffer, size_t size) {
 #if defined(NIMBLE_V2)
 
 void BleKeyboard::onConnect(BLEServer* pServer, NimBLEConnInfo& connInfo) {
-  this->connected = true;
+  this->connected = false;
+  this->isAuthenticated = false;
+  this->isKeyboardSubscribed = false;
+  this->isMediaKeysSubscribed = false;
 }
 
 void BleKeyboard::onDisconnect(BLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
   this->connected = false;
+  this->isAuthenticated = false;
+  this->isKeyboardSubscribed = false;
+  this->isMediaKeysSubscribed = false;
+}
+
+void BleKeyboard::onAuthenticationComplete(NimBLEConnInfo& connInfo) {
+  if (connInfo.isEncrypted() || connInfo.isBonded() || connInfo.isAuthenticated()) {
+    this->isAuthenticated = true;
+    if (this->isKeyboardSubscribed || this->isMediaKeysSubscribed) {
+      this->connected = true;
+    }
+  }
+}
+
+void BleKeyboard::onSubscribe(BLECharacteristic* me, NimBLEConnInfo& connInfo, uint16_t subValue) {
+  if (me == this->inputKeyboard) {
+    this->isKeyboardSubscribed = (subValue > 0);
+  } else if (me == this->inputMediaKeys) {
+    this->isMediaKeysSubscribed = (subValue > 0);
+  }
+
+  if (this->isKeyboardSubscribed || this->isMediaKeysSubscribed) {
+    if (this->isAuthenticated || connInfo.isEncrypted() || connInfo.isBonded()) {
+      this->connected = true;
+    }
+  } else {
+    this->connected = false;
+  }
 }
 
 void BleKeyboard::onWrite(BLECharacteristic* me, NimBLEConnInfo& connInfo) {
