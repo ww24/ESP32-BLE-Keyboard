@@ -5,6 +5,13 @@
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
 #include <NimBLEHIDDevice.h>
+#if defined(NIMBLE_V2)
+#if __has_include(<nimble/nimble/host/services/gap/include/services/gap/ble_svc_gap.h>)
+#include <nimble/nimble/host/services/gap/include/services/gap/ble_svc_gap.h>
+#elif __has_include(<services/gap/ble_svc_gap.h>)
+#include <services/gap/ble_svc_gap.h>
+#endif
+#endif
 #else
 #include <BLEDevice.h>
 #include <BLEUtils.h>
@@ -106,8 +113,29 @@ void BleKeyboard::begin(void)
   BLEDevice::init(deviceName);
   BLEServer* pServer = BLEDevice::createServer();
   pServer->setCallbacks(this);
+#if defined(NIMBLE_V2)
+  pServer->advertiseOnDisconnect(true);
+#endif
 
   hid = new BLEHIDDevice(pServer);
+#if defined(NIMBLE_V2)
+  inputKeyboard = hid->getInputReport(KEYBOARD_ID);  // <-- input REPORTID from report map
+  outputKeyboard = hid->getOutputReport(KEYBOARD_ID);
+  inputMediaKeys = hid->getInputReport(MEDIA_KEYS_ID);
+
+  outputKeyboard->setCallbacks(this);
+  inputKeyboard->setCallbacks(this);
+  inputMediaKeys->setCallbacks(this);
+
+  hid->setManufacturer(deviceManufacturer);
+  hid->setPnp(0x02, vid, pid, version);
+  hid->setHidInfo(0x00, 0x01);
+
+#if __has_include(<nimble/nimble/host/services/gap/include/services/gap/ble_svc_gap.h>) || __has_include(<services/gap/ble_svc_gap.h>)
+  ble_svc_gap_device_appearance_set(HID_KEYBOARD);
+#endif
+
+#else
   inputKeyboard = hid->inputReport(KEYBOARD_ID);  // <-- input REPORTID from report map
   outputKeyboard = hid->outputReport(KEYBOARD_ID);
   inputMediaKeys = hid->inputReport(MEDIA_KEYS_ID);
@@ -118,6 +146,7 @@ void BleKeyboard::begin(void)
 
   hid->pnp(0x02, vid, pid, version);
   hid->hidInfo(0x00, 0x01);
+#endif
 
 
 #if defined(USE_NIMBLE)
@@ -131,6 +160,19 @@ void BleKeyboard::begin(void)
 
 #endif // USE_NIMBLE
 
+#if defined(NIMBLE_V2)
+  hid->setReportMap((uint8_t*)_hidReportDescriptor, sizeof(_hidReportDescriptor));
+
+  onStarted(pServer);
+
+  advertising = pServer->getAdvertising();
+  advertising->setAppearance(HID_KEYBOARD);
+  advertising->addServiceUUID(hid->getHidService()->getUUID());
+  advertising->setName(deviceName.substr(0, 15));
+  advertising->enableScanResponse(false);
+  advertising->start();
+  hid->setBatteryLevel(batteryLevel);
+#else
   hid->reportMap((uint8_t*)_hidReportDescriptor, sizeof(_hidReportDescriptor));
   hid->startServices();
 
@@ -142,6 +184,7 @@ void BleKeyboard::begin(void)
   advertising->setScanResponse(false);
   advertising->start();
   hid->setBatteryLevel(batteryLevel);
+#endif
 
   ESP_LOGD(LOG_TAG, "Advertising started!");
 }
@@ -500,6 +543,57 @@ size_t BleKeyboard::write(const uint8_t *buffer, size_t size) {
 	return n;
 }
 
+#if defined(NIMBLE_V2)
+
+void BleKeyboard::onConnect(BLEServer* pServer, NimBLEConnInfo& connInfo) {
+  this->connected = false;
+  this->isAuthenticated = false;
+  this->isKeyboardSubscribed = false;
+  this->isMediaKeysSubscribed = false;
+}
+
+void BleKeyboard::onDisconnect(BLEServer* pServer, NimBLEConnInfo& connInfo, int reason) {
+  this->connected = false;
+  this->isAuthenticated = false;
+  this->isKeyboardSubscribed = false;
+  this->isMediaKeysSubscribed = false;
+}
+
+void BleKeyboard::onAuthenticationComplete(NimBLEConnInfo& connInfo) {
+  if (connInfo.isEncrypted() || connInfo.isBonded() || connInfo.isAuthenticated()) {
+    this->isAuthenticated = true;
+    if (this->isKeyboardSubscribed || this->isMediaKeysSubscribed) {
+      this->connected = true;
+    }
+  }
+}
+
+void BleKeyboard::onSubscribe(BLECharacteristic* me, NimBLEConnInfo& connInfo, uint16_t subValue) {
+  if (me == this->inputKeyboard) {
+    this->isKeyboardSubscribed = (subValue > 0);
+  } else if (me == this->inputMediaKeys) {
+    this->isMediaKeysSubscribed = (subValue > 0);
+  }
+
+  if (this->isKeyboardSubscribed || this->isMediaKeysSubscribed) {
+    if (this->isAuthenticated || connInfo.isEncrypted() || connInfo.isBonded()) {
+      this->connected = true;
+    }
+  } else {
+    this->connected = false;
+  }
+}
+
+void BleKeyboard::onWrite(BLECharacteristic* me, NimBLEConnInfo& connInfo) {
+  // getValue() returns NimBLEAttValue by value; keep it alive while reading.
+  NimBLEAttValue value = me->getValue();
+  if (value.size() > 0) {
+    ESP_LOGI(LOG_TAG, "special keys: %d", value[0]);
+  }
+}
+
+#else
+
 void BleKeyboard::onConnect(BLEServer* pServer) {
   this->connected = true;
 
@@ -534,6 +628,8 @@ void BleKeyboard::onWrite(BLECharacteristic* me) {
   (void)value;
   ESP_LOGI(LOG_TAG, "special keys: %d", *value);
 }
+
+#endif // NIMBLE_V2
 
 void BleKeyboard::delay_ms(uint64_t ms) {
   uint64_t m = esp_timer_get_time();

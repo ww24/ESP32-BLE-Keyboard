@@ -8,8 +8,18 @@
 
 #if defined(USE_NIMBLE)
 
+#include "NimBLEDevice.h"
+#include "NimBLEServer.h"
 #include "NimBLECharacteristic.h"
 #include "NimBLEHIDDevice.h"
+
+#if __has_include(<NimBLECppVersion.h>)
+#include <NimBLECppVersion.h>
+#endif
+#if defined(NIMBLE_CPP_VERSION_MAJOR) && (NIMBLE_CPP_VERSION_MAJOR >= 2)
+#define NIMBLE_V2 1
+#include "NimBLEConnInfo.h"
+#endif
 
 #define BLEDevice                  NimBLEDevice
 #define BLEServerCallbacks         NimBLEServerCallbacks
@@ -142,6 +152,11 @@ private:
   std::string        deviceManufacturer;
   uint8_t            batteryLevel;
   bool               connected = false;
+#if defined(NIMBLE_V2)
+  bool               isAuthenticated = false;
+  bool               isKeyboardSubscribed = false;
+  bool               isMediaKeysSubscribed = false;
+#endif
   uint32_t           _delay_ms = 7;
   void delay_ms(uint64_t ms);
 
@@ -172,10 +187,19 @@ public:
   void set_product_id(uint16_t pid);
   void set_version(uint16_t version);
 protected:
+#if defined(NIMBLE_V2)
+  virtual void onStarted(BLEServer *pServer) { };
+  virtual void onConnect(BLEServer* pServer, NimBLEConnInfo& connInfo) override;
+  virtual void onDisconnect(BLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override;
+  virtual void onAuthenticationComplete(NimBLEConnInfo& connInfo) override;
+  virtual void onWrite(BLECharacteristic* me, NimBLEConnInfo& connInfo) override;
+  virtual void onSubscribe(BLECharacteristic* me, NimBLEConnInfo& connInfo, uint16_t subValue) override;
+#else
   virtual void onStarted(BLEServer *pServer) { };
   virtual void onConnect(BLEServer* pServer) override;
   virtual void onDisconnect(BLEServer* pServer) override;
   virtual void onWrite(BLECharacteristic* me) override;
+#endif
 
 };
 
